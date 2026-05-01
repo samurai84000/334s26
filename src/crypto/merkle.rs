@@ -1,29 +1,81 @@
 use super::hash::{Hashable, H256};
-
+use ring::digest;
 /// A Merkle tree.
 #[derive(Debug, Default)]
 pub struct MerkleTree {
+    levels: Vec<Vec<H256>>,
 }
 
 impl MerkleTree {
+    fn hash_children(left: &H256, right: &H256) -> H256 {
+        let mut ctx = digest::Context::new(&digest::SHA256);
+
+        ctx.update(left.as_ref());
+        ctx.update(right.as_ref());
+        ctx.finish().into()
+    }
+
     pub fn new<T>(data: &[T]) -> Self where T: Hashable, {
-        unimplemented!()
+        assert!(!data.is_empty());
+
+        let mut levels = Vec::new();
+        let mut current_level: Vec<H256> = data.iter().map(|item| item.hash()).collect();
+        levels.push(current_level.clone());
+
+        while current_level.len() > 1 {
+            if current_level.len() % 2 == 1 {
+                let last = current_level.last().unwrap().clone();
+                current_level.push(last);
+            }
+
+            let mut next_level = Vec::new();
+            for i in (0..current_level.len()).step_by(2) {
+                next_level.push(Self::hash_children(&current_level[i], &current_level[i + 1]));
+            }
+            current_level = next_level.clone();
+            levels.push(next_level);
+        }
+
+        MerkleTree { levels }
     }
 
     pub fn root(&self) -> H256 {
-        unimplemented!()
+        self.levels.last().expect("Tree should have levels")[0]
     }
 
-    /// Returns the Merkle Proof of data at index i
     pub fn proof(&self, index: usize) -> Vec<H256> {
-        unimplemented!()
+        let mut proof = Vec::new();
+        let mut curr_idx = index;
+
+        for i in 0..self.levels.len() - 1 {
+            let level = &self.levels[i];
+            let sibling_idx = if curr_idx % 2 == 0 { curr_idx + 1 } else { curr_idx - 1 };
+            proof.push(level[sibling_idx]);
+            curr_idx /= 2;
+        }
+        proof
     }
 }
 
 /// Verify that the datum hash with a vector of proofs will produce the Merkle root. Also need the
 /// index of datum and `leaf_size`, the total number of leaves.
-pub fn verify(root: &H256, datum: &H256, proof: &[H256], index: usize, leaf_size: usize) -> bool {
-    unimplemented!()
+pub fn verify(root: &H256, datum: &H256, proof: &[H256], index: usize, _leaf_size: usize) -> bool {
+    let mut curr_hash = *datum;
+    let mut curr_idx = index;
+
+    for sibling in proof {
+        let mut ctx = digest::Context::new(&digest::SHA256);
+        if curr_idx % 2 == 0 {
+            ctx.update(curr_hash.as_ref());
+            ctx.update(sibling.as_ref());
+        } else {
+            ctx.update(sibling.as_ref());
+            ctx.update(curr_hash.as_ref());
+        }
+        curr_hash = ctx.finish().into();
+        curr_idx /= 2;
+    }
+    curr_hash == *root
 }
 
 #[cfg(test)]

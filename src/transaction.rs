@@ -1,28 +1,34 @@
-use serde::{Serialize,Deserialize};
-use ring::signature::{Ed25519KeyPair, Signature, KeyPair, VerificationAlgorithm, EdDSAParameters};
+use serde::{Serialize, Deserialize};
+// ring::signature::{self} allows using signature::ED25519 or importing it directly
+use ring::signature::{self, Ed25519KeyPair, Signature, KeyPair, UnparsedPublicKey, ED25519};
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct RawTransaction {
+    pub data: String,
+    pub amount: u64,
 }
 
-/// Create digital signature of a transaction
 pub fn sign(t: &RawTransaction, key: &Ed25519KeyPair) -> Signature {
-    unimplemented!()
+    let msg = bincode::serialize(t).expect("Serialization failed");
+    key.sign(&msg) // No semicolon: returns Signature
 }
 
-/// Verify digital signature of a transaction, using public key instead of secret key
-pub fn verify(t: &RawTransaction, public_key: &<Ed25519KeyPair as KeyPair>::PublicKey, signature: &Signature) -> bool {
-    unimplemented!()
+pub fn verify(t: &RawTransaction, public_key: &[u8], signature: &[u8]) -> bool {
+    let msg = bincode::serialize(t).expect("Serialization failed");
+    let unparsed_key = UnparsedPublicKey::new(&ED25519, public_key);
+    unparsed_key.verify(&msg, signature).is_ok()
 }
 
 #[cfg(any(test, test_utilities))]
 mod tests {
     use super::*;
-    use crate::crypto::key_pair;
+    use crate::crypto::key_pair; 
 
     pub fn generate_random_transaction() -> RawTransaction {
-        Default::default()
-        //unimplemented!()
+        RawTransaction {
+            data: format!("Transaction-{}", rand::random::<u16>()),
+            amount: rand::random::<u64>(),
+        }
     }
 
     #[test]
@@ -30,6 +36,7 @@ mod tests {
         let t = generate_random_transaction();
         let key = key_pair::random();
         let signature = sign(&t, &key);
-        assert!(verify(&t, &(key.public_key()), &signature));
+        // Ensure we pass the public key and signature as byte slices
+        assert!(verify(&t, key.public_key().as_ref(), signature.as_ref()));
     }
 }
