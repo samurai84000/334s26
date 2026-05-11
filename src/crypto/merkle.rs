@@ -1,11 +1,31 @@
 use super::hash::{Hashable, H256};
 use ring::digest;
 /// A Merkle tree.
-#[derive(Debug, Default)]
+
+#[derive(Debug, Default, Clone)] // Added Clone here
+struct MerkleTreeNode {
+    left: Option<Box<MerkleTreeNode>>,
+    right: Option<Box<MerkleTreeNode>>,
+    hash: H256,
+}
 pub struct MerkleTree {
+    // Fix: Use Vec<Vec<H256>> to store the tree levels as used in your new() logic
     levels: Vec<Vec<H256>>,
 }
 
+fn hash_children(left: &H256, right: &H256) -> H256 {
+    let mut ctx = digest::Context::new(&digest::SHA256);
+    ctx.update(left.as_ref());
+    ctx.update(right.as_ref());
+    ctx.finish().into()
+}
+
+fn duplicate_last_node(nodes: &mut Vec<Option<MerkleTreeNode>>) {
+    if let Some(last_node) = nodes.last() {
+        // This will now work because MerkleTreeNode (and thus Option<MerkleTreeNode>) is Clone
+        nodes.push(last_node.clone());
+    }
+}
 impl MerkleTree {
     fn hash_children(left: &H256, right: &H256) -> H256 {
         let mut ctx = digest::Context::new(&digest::SHA256);
@@ -40,17 +60,21 @@ impl MerkleTree {
     }
 
     pub fn root(&self) -> H256 {
-        self.levels.last().expect("Tree should have levels")[0]
+        // Access the first element of the last level (the root)
+        self.levels.last().map(|l| l[0]).unwrap_or_default()
     }
-
     pub fn proof(&self, index: usize) -> Vec<H256> {
         let mut proof = Vec::new();
         let mut curr_idx = index;
 
+        // Iterate through levels from bottom to top (excluding the root level)
         for i in 0..self.levels.len() - 1 {
             let level = &self.levels[i];
             let sibling_idx = if curr_idx % 2 == 0 { curr_idx + 1 } else { curr_idx - 1 };
-            proof.push(level[sibling_idx]);
+            
+            if sibling_idx < level.len() {
+                proof.push(level[sibling_idx]);
+            }
             curr_idx /= 2;
         }
         proof
