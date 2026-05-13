@@ -81,9 +81,10 @@ fn main() {
     worker_ctx.start();
 
     // start the miner
-    let (miner_ctx, miner) = miner::new(
-        &server,
-    );
+    let blockchain = crate::blockchain::Blockchain::new();
+    let blockchain = std::sync::Arc::new(std::sync::Mutex::new(blockchain));
+
+    let (miner_ctx, miner_handle) = miner::new(&server, &blockchain);
     miner_ctx.start();
 
     // connect to known peers
@@ -120,13 +121,12 @@ fn main() {
     }
 
 
-    // start the API server
     ApiServer::start(
-        api_addr,
-        &miner,
-        &server,
-    );
-
+            api_addr,
+            &miner_handle,
+            &server,
+            &blockchain, // Add the 4th argument here
+        );
     loop {
         std::thread::park();
     }

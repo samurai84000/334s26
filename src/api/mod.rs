@@ -1,7 +1,12 @@
+use std::sync::{Arc, Mutex};
+use std::path::Path;
 use serde::Serialize;
 use crate::miner::Handle as MinerHandle;
 use crate::network::server::Handle as NetworkServerHandle;
 use crate::network::message::Message;
+use crate::blockchain::Blockchain;
+use crate::network::server::Handle as NetworkHandle;
+use crate::crypto::hash::Hashable;
 
 use log::info;
 use std::collections::HashMap;
@@ -10,6 +15,8 @@ use tiny_http::Header;
 use tiny_http::Response;
 use tiny_http::Server as HTTPServer;
 use url::Url;
+
+
 
 pub struct Server {
     handle: HTTPServer,
@@ -41,6 +48,7 @@ impl Server {
         addr: std::net::SocketAddr,
         miner: &MinerHandle,
         network: &NetworkServerHandle,
+        blockchain: &Arc<Mutex<Blockchain>>, // Just add this line
     ) {
         let handle = HTTPServer::http(&addr).unwrap();
         let server = Self {

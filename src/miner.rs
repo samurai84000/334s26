@@ -1,14 +1,17 @@
 use crate::network::server::Handle as ServerHandle;
+use crate::blockchain::Blockchain;
+use crate::block::{Block, Header, Content};
+use crate::crypto::hash::{H256, Hashable};
+use crate::crypto::merkle::MerkleTree;
 
 use log::info;
-
 use crossbeam::channel::{unbounded, Receiver, Sender, TryRecvError};
-use std::time;
-
+use std::time::{self, SystemTime, UNIX_EPOCH};
 use std::thread;
+use std::sync::{Arc, Mutex};
 
 enum ControlSignal {
-    Start(u64), // the number controls the lambda of interval between block generation
+    Start(u64), // lambda
     Exit,
 }
 
@@ -19,57 +22,44 @@ enum OperatingState {
 }
 
 pub struct Context {
-    /// Channel for receiving control signal
     control_chan: Receiver<ControlSignal>,
     operating_state: OperatingState,
     server: ServerHandle,
+    blockchain: Arc<Mutex<Blockchain>>, // Add this
 }
-
 #[derive(Clone)]
 pub struct Handle {
-    /// Channel for sending signal to the miner thread
     control_chan: Sender<ControlSignal>,
 }
 
-pub fn new(
-    server: &ServerHandle,
-) -> (Context, Handle) {
+pub fn new(server: &ServerHandle, blockchain: &Arc<Mutex<Blockchain>>) -> (Context, Handle) {
     let (signal_chan_sender, signal_chan_receiver) = unbounded();
-
-    let ctx = Context {
-        control_chan: signal_chan_receiver,
-        operating_state: OperatingState::Paused,
-        server: server.clone(),
-    };
-
-    let handle = Handle {
-        control_chan: signal_chan_sender,
-    };
-
-    (ctx, handle)
+    (
+        Context {
+            control_chan: signal_chan_receiver,
+            operating_state: OperatingState::Paused,
+            server: server.clone(),
+            blockchain: Arc::clone(blockchain), // Clone the Arc
+        },
+        Handle { control_chan: signal_chan_sender },
+    )
 }
 
 impl Handle {
     pub fn exit(&self) {
-        self.control_chan.send(ControlSignal::Exit).unwrap();
+        let _ = self.control_chan.send(ControlSignal::Exit);
     }
 
     pub fn start(&self, lambda: u64) {
-        self.control_chan
-            .send(ControlSignal::Start(lambda))
-            .unwrap();
+        let _ = self.control_chan.send(ControlSignal::Start(lambda));
     }
-
 }
 
 impl Context {
     pub fn start(mut self) {
-        thread::Builder::new()
-            .name("miner".to_string())
-            .spawn(move || {
-                self.miner_loop();
-            })
-            .unwrap();
+        thread::spawn(move || {
+            self.miner_loop();
+        });
         info!("Miner initialized into paused mode");
     }
 
@@ -86,37 +76,38 @@ impl Context {
         }
     }
 
-    fn miner_loop(&mut self) {
-        // main mining loop
+fn miner_loop(&mut self) {
         loop {
-            // check and react to control signals
-            match self.operating_state {
-                OperatingState::Paused => {
-                    let signal = self.control_chan.recv().unwrap();
-                    self.handle_control_signal(signal);
-                    continue;
-                }
-                OperatingState::ShutDown => {
-                    return;
-                }
-                _ => match self.control_chan.try_recv() {
-                    Ok(signal) => {
-                        self.handle_control_signal(signal);
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => panic!("Miner control channel detached"),
-                },
-            }
-            if let OperatingState::ShutDown = self.operating_state {
-                return;
-            }
-
-            // TODO: actual mining
+            // ... (Keep the existing match self.operating_state logic)
 
             if let OperatingState::Run(i) = self.operating_state {
+                // SIMPLE MINING LOGIC
+                let (parent, difficulty) = {
+                    let bc = self.blockchain.lock().unwrap();
+                    (bc.tip(), [0u8; 32].into()) // Use a target for mining
+                };
+
+                let transactions = vec![]; // Empty for now
+                let mut block = Block {
+                    header: Header {
+                        parent,
+                        nonce: rand::random(),
+                        difficulty,
+                        timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+                        merkle_root: MerkleTree::new(&transactions).root(),
+                    },
+                    content: Content { transactions },
+                };
+
+                // Try to solve the puzzle
+                if block.hash() <= difficulty {
+                    let mut bc = self.blockchain.lock().unwrap();
+                    bc.insert(&block);
+                    info!("Mined a block! Hash: {}", block.hash());
+                }
+
                 if i != 0 {
-                    let interval = time::Duration::from_micros(i as u64);
-                    thread::sleep(interval);
+                    thread::sleep(time::Duration::from_micros(i));
                 }
             }
         }
